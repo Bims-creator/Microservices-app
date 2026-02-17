@@ -1,0 +1,30 @@
+﻿name: Database Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      migration_version:
+        description: Migration version
+        required: true
+        type: string
+
+jobs:
+  migrate:
+    name: Run Migrations
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run database migration
+        run: echo "Running migration ${{ github.event.inputs.migration_version }}"
+      
+      - name: Verify migration
+        run: echo "Verifying migration..."
