@@ -1,0 +1,60 @@
+name: Manual Production Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag (commit SHA) to deploy'
+        required: true
+
+jobs:
+  deploy_production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+
+      - name: Configure kubeconfig
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" > kubeconfig
+          export KUBECONFIG=$PWD/kubeconfig
+          echo "KUBECONFIG=$PWD/kubeconfig" >> $GITHUB_ENV
+
+      - name: Update images in production manifests
+        run: |
+          TAG="${{ github.event.inputs.image_tag }}"
+          for svc in api-service auth-service worker-service; do
+            IMAGE="${{ secrets.DOCKER_REPO }}/$svc:$TAG"
+            yq -i ".spec.template.spec.containers[0].image = \"$IMAGE\"" \
+              k8s/production/$svc/deployment.yaml
+          done
+
+      - name: Apply production manifests
+        run: |
+          kubectl apply -f k8s/production
+
+      - name: Verify rollouts
+        run: |
+          for svc in api-service auth-service worker-service; do
+            bash scripts/verify-deployment.sh $svc production
+          done
+
+      - name: Run production smoke tests
+        run: |
+          bash tests/smoke.tests.sh
+
+      - name: Notify Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          STATUS="🚀 Production deployment completed for tag ${{ github.event.inputs.image_tag }}"
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"$STATUS\"}" \
+            "$SLACK_WEBHOOK_URL"

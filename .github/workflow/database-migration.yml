@@ -1,0 +1,54 @@
+name: Database Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to migrate (staging|production)'
+        required: true
+        default: 'staging'
+
+jobs:
+  migrate_db:
+    runs-on: ubuntu-latest
+
+    env:
+      ENVIRONMENT: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set DATABASE_URL
+        id: db
+        run: |
+          if [ "$ENVIRONMENT" = "staging" ]; then
+            echo "DATABASE_URL=${{ secrets.DATABASE_URL_STAGING }}" >> $GITHUB_ENV
+          else
+            echo "DATABASE_URL=${{ secrets.DATABASE_URL_PRODUCTION }}" >> $GITHUB_ENV
+          fi
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        working-directory: services/api-service
+        run: npm install
+
+      - name: Run migrations
+        working-directory: services/api-service
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: |
+          npx prisma migrate deploy
+
+      - name: Notify Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          STATUS="📦 DB migrations run for $ENVIRONMENT"
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"$STATUS\"}" \
+            "$SLACK_WEBHOOK_URL"
